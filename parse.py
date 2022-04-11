@@ -1,42 +1,17 @@
+#!/usr/bin/env python3
 
-# pdffile = "/Users/bradneuman/Downloads/prosper-2021-1099-b.pdf"
-pdffile = "prosper-2021-1099-b.pdf"
-
-# from tabula import read_pdf
-# from tabulate import tabulate
-
-# #reads table from pdf file
-# df = read_pdf("/Users/bradneuman/Downloads/prosper-2021-1099-b.pdf",pages="all") #address of pdf file
-# print(tabulate(df))
-
-from pprint import pprint
 import camelot
 import re
 
-try:
-    print(tables)
-except NameError as ne:
-    # extract all the tables in the PDF file
-    tables = camelot.read_pdf(pdffile, pages='all', flavor='stream')
-
-    print(tables)
-
-# print the first table as Pandas DataFrame
-# print(tables[0].df)
-
-# if len(tables) < 1:
-#     print("unable to parse any table")
-#     return None
-# if len(tables) > 1:
-#     print("not sure how to handle multiple tables, bailing")
-#     return None
-
+# Some regexe's for text I found in my form
 cashRegex = '\$([0-9]*\.[0-9][0-9])'
 boxRegex = 'with *Box *([A-F]) *checked'
+box1ERegex = '[B,b]ox *1 *e'
 
 def getColumns(table):
-    ''' Check the text for the needed headers "Proceeds" and "Other" '''
-
+    '''Check the text for the needed headers Proceeds, Other, and Description.
+    Return a map from the column type to the numerical column
+    '''
     
     df = table.df
     sz = df.shape
@@ -52,19 +27,19 @@ def getColumns(table):
             cell = df[col][row]
             if '1d.' in cell and 'Proceeds' in cell:
                 columns['proceeds'] = col
-                # print("found at {}, {}: {}".format(col, row, cell))
             if 'Other' in cell:
                 columns['other'] = col
-                # print("found at {}, {}: {}".format(col, row, cell))
             if '1a.' in cell and 'Description' in cell:
                 columns['description'] = col
-                # print("found at {}, {}: {}".format(col, row, cell))
 
     return columns
 
-
 def readTable(table, columnKey):
-    ''' Tabulate the table '''
+    '''Read the entries out of the given table.
+
+    Requires a table and a columnKey, and returns a dict with an appended list of everything we want to find
+
+    '''
 
     res = {'1d': [],
            '1e': [],
@@ -104,23 +79,16 @@ def readTable(table, columnKey):
 
         # now, find the 1.e entries in 'other'
         cell = df[columnKey['other']][row]
-        if re.search('[B,b]ox *1 *e', cell):
+        if re.search(box1ERegex, cell):
             r = re.search(cashRegex, cell)
             if r:
                 res['1e'].append(float(r.groups()[0]))
-
-
-    # if res['box'] != 'unknown':
-    #     print ('Read table for "box {} checked"'.format(res['box']))
-    # else:
-    #     print ('could not figure out which "filing box" was checked in this table')
-    # print (f'found {num1d} proceeds totalling {sum1d}')
-    # print (f'and {num1e} cost bases totally {sum1e}')
-    # print (f'(and also {num1a} description rows)')
     return res
 
-def readPages(tables):
-    ''' iterate through each table in the input and return the parsed version '''
+def readTables(tables):
+    '''
+    Iterate through each table in the list of `tables`, read them, and return the aggregated output.
+    '''
     pages = []
     for table in tables:
         columnKey = getColumns(table)
@@ -131,7 +99,8 @@ def readPages(tables):
     return pages
 
 def tabulate(pages):
-    ''' given parsed pages, combine them all into a report '''
+    ''' Gived the aggregated parsed data from the tables, combine it all appriorately and return the result.
+    '''
     totals = {}
     errors = False
 
@@ -185,11 +154,14 @@ def tabulate(pages):
                 len(totals[box]['1a']),
                 len(totals[box]['1d']),
                 len(totals[box]['1e'])))
-                
-    if errors:
-        totals['errors'] = True
 
-    return totals
+
+    ret = {'data': totals}
+    if errors:
+        ret['errors'] = True
+
+    return ret
+
 
 def report(tabulated):
     ''' given tabulated results, print a report'''
@@ -199,13 +171,38 @@ def report(tabulated):
 
 
     print('BOX | {:9} | {:9}'.format('1d', '1e'))
-    for box in tabulated:
+    for box in tabulated['data']:
         if box == 'errors':
             continue
         print('{:3} | {:9,.2f} | {:9,.2f}'.format(box,
-                                                  sum(tabulated[box]['1d']),
-                                                  sum(tabulated[box]['1e'])))
+                                                  sum(tabulated['data'][box]['1d']),
+                                                  sum(tabulated['data'][box]['1e'])))
 
-    print('sum | {:9,.2f} | {:9,.2f}'.format(sum([sum(tabulated[b]['1d']) for b in tabulated]),
-                                             sum([sum(tabulated[b]['1e']) for b in tabulated])))
+    print('sum | {:9,.2f} | {:9,.2f}'.format(
+        sum([sum(tabulated['data'][b]['1d']) for b in tabulated['data']]),
+        sum([sum(tabulated['data'][b]['1e']) for b in tabulated['data']])))
 
+if __name__ == '__main__':
+    import sys
+    def usage():
+        print('''
+        usage: {} filename
+        
+        where filename is exactly the 1099-b form I received one time in 2021 from Prosper.
+        Seriously, this code probably won't work, but maybe it'll be an interesting starting point.
+        '''.format(sys.argv[0]))
+
+    if len(sys.argv) != 2 or sys.argv[1] == '-h' or sys.argv[1] == '--help':
+        usage()
+        exit(-1)
+
+    tables = camelot.read_pdf(sys.argv[1], pages='all', flavor='stream')
+    if not tables:
+        print('ERROR: could not read file!\n')              
+        usage()
+        exit(-1)
+
+    
+    parsed = readTables(tables)
+    tabulated = tabulate(parsed)
+    report(tabulated)
