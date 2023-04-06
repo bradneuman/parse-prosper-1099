@@ -4,7 +4,13 @@ import camelot
 import re
 
 # Some regexe's for text I found in my form
-cashRegex = '\$([0-9]*\.[0-9][0-9])'
+cashRegex = '\$(-*[0-9]*\.[0-9][0-9])'
+
+# first do a swap to change '($X)' to '$-X'
+cashRegexPrepFind = '\(\$(.*)\)'
+cashRegexPrepReplace = '$-\\1'
+
+
 boxRegex = 'with *Box *([A-F]) *checked'
 box1ERegex = '[B,b]ox *1 *e'
 
@@ -60,7 +66,7 @@ def readTable(table, columnKey):
         if hasDescription and row > 3:
             res['1a'].append(df[columnKey['description']][row])
         
-        r = re.search(cashRegex, df[columnKey['proceeds']][row])
+        r = re.search(cashRegex, re.sub(cashRegexPrepFind, cashRegexPrepReplace, df[columnKey['proceeds']][row]))
         hasProceeds = False
         if r:
             hasProceeds = True
@@ -69,6 +75,7 @@ def readTable(table, columnKey):
                 # print(f'assuming this is the summary row: {r.groups()[0]}')
                 res['summary_1d'] = float(r.groups()[0])
             else:
+                # print(df[columnKey['proceeds']][row])
                 res['1d'].append(float(r.groups()[0]))
 
         for col in range(sz[1]):
@@ -80,7 +87,7 @@ def readTable(table, columnKey):
         # now, find the 1.e entries in 'other'
         cell = df[columnKey['other']][row]
         if re.search(box1ERegex, cell):
-            r = re.search(cashRegex, cell)
+            r = re.search(cashRegex, re.sub(cashRegexPrepFind, cashRegexPrepReplace, cell))
             if r:
                 res['1e'].append(float(r.groups()[0]))
     return res
@@ -99,7 +106,7 @@ def readTables(tables):
     return pages
 
 def tabulate(pages):
-    ''' Gived the aggregated parsed data from the tables, combine it all appriorately and return the result.
+    ''' Given the aggregated parsed data from the tables, combine it all appriorately and return the result.
     '''
     totals = {}
     errors = False
